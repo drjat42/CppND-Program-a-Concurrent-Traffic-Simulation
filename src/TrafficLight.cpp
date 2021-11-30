@@ -1,6 +1,7 @@
 #include <iostream>
 #include <random>
 #include "TrafficLight.h"
+#include <chrono>
 
 /* Implementation of class "MessageQueue" */ 
 template <typename T>
@@ -24,7 +25,7 @@ void MessageQueue<T>::send(T &&msg)
     // FP.4a : The method send should use the mechanisms std::lock_guard<std::mutex> 
     // as well as _condition.notify_one() to add a new message to the queue and afterwards send a notification.
     std::lock_guard<std::mutex> uLock(_mutex);
-    _queue.push_back(std::move(msg));
+    _queue.push_back(std::move(msg)); 
     _condition.notify_one();
 }
 
@@ -32,7 +33,8 @@ void MessageQueue<T>::send(T &&msg)
 /* Implementation of class "TrafficLight" */
 TrafficLight::TrafficLight()
 {
-    _currentPhase = TrafficLight::TrafficLightPhase::red;
+     std::unique_lock<std::mutex> uLock(_mutex);
+    _currentPhase = TrafficLightPhase::red;
 }
 
 void TrafficLight::waitForGreen()
@@ -49,8 +51,9 @@ void TrafficLight::waitForGreen()
     }
 }
 
-TrafficLight::TrafficLightPhase TrafficLight::getCurrentPhase()
+TrafficLightPhase TrafficLight::getCurrentPhase()
 {
+    std::unique_lock<std::mutex> uLock(_mutex);
     return _currentPhase;
 }
 
@@ -76,12 +79,18 @@ void TrafficLight::cycleThroughPhases()
         std::chrono::time_point<std::chrono::steady_clock> now =  std::chrono::steady_clock::now();
         std::chrono::time_point<std::chrono::steady_clock> phaseEnd = now +  std::chrono::milliseconds(phaseLengthMS);
 
-        while (now < phaseEnd) {
+        // Why are these coundoown calculations necessary?  Why can't I just compare time_points?                     
+        long countdown = std::chrono::duration_cast<std::chrono::milliseconds>(phaseEnd - now).count();
+        while(  countdown > 0) {
+//        while (now <= phaseEnd) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             auto now =  std::chrono::steady_clock::now();
+            countdown = std::chrono::duration_cast<std::chrono::milliseconds>(phaseEnd - now).count();
         }
-        _currentPhase = _currentPhase == TrafficLight::TrafficLightPhase::green ? TrafficLight::TrafficLightPhase::red : TrafficLight::TrafficLightPhase::green;
+        std::unique_lock<std::mutex> uLock(_mutex);
+        _currentPhase = _currentPhase == TrafficLightPhase::green ? TrafficLightPhase::red : TrafficLightPhase::green;
         _messages.send(std::move(_currentPhase));
+        uLock.unlock();
     }
  }
 
