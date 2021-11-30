@@ -25,7 +25,8 @@ void MessageQueue<T>::send(T &&msg)
     // FP.4a : The method send should use the mechanisms std::lock_guard<std::mutex> 
     // as well as _condition.notify_one() to add a new message to the queue and afterwards send a notification.
     std::lock_guard<std::mutex> uLock(_mutex);
-    _queue.push_back(std::move(msg)); 
+    _queue.clear();
+    _queue.emplace_back(msg); 
     _condition.notify_one();
 }
 
@@ -35,6 +36,11 @@ TrafficLight::TrafficLight()
 {
      std::unique_lock<std::mutex> uLock(_mutex);
     _currentPhase = TrafficLightPhase::red;
+}
+
+TrafficLight::~TrafficLight() 
+{
+    // Nothing to destroy here?
 }
 
 void TrafficLight::waitForGreen()
@@ -53,7 +59,8 @@ void TrafficLight::waitForGreen()
 
 TrafficLightPhase TrafficLight::getCurrentPhase()
 {
-    std::unique_lock<std::mutex> uLock(_mutex);
+    // Lock avoids race between TrafficLIght::cycleThroughPhases and Intersection::TrafficLightIsGreen 
+    std::unique_lock<std::mutex> uLock(_mutex); 
     return _currentPhase;
 }
 
@@ -62,8 +69,6 @@ void TrafficLight::simulate()
     // FP.2b : Finally, the private method „cycleThroughPhases“ should be started in a thread when the public method „simulate“ is called. To do this, use the thread queue in the base class. 
     threads.emplace_back(std::thread(&TrafficLight::cycleThroughPhases, this));
 }
-
-
 
 // virtual function which is executed in a thread
 void TrafficLight::cycleThroughPhases()
@@ -74,18 +79,20 @@ void TrafficLight::cycleThroughPhases()
     // Also, the while-loop should use std::this_thread::sleep_for to wait 1ms between two cycles. 
     /* initialize random seed */
     srand (time(NULL));
+    int phaseLengthMS;
+    std::chrono::time_point<std::chrono::steady_clock> now;
+    std::chrono::time_point<std::chrono::steady_clock> phaseEnd;
+    std::random_device rd;
+    std::mt19937 mersenne_twister(rd());
+    std::uniform_int_distribution<> dist(4000,6000);
     while (true) {
-        int phaseLengthMS = rand() % 2000 + 4000;
-        std::chrono::time_point<std::chrono::steady_clock> now =  std::chrono::steady_clock::now();
-        std::chrono::time_point<std::chrono::steady_clock> phaseEnd = now +  std::chrono::milliseconds(phaseLengthMS);
+        phaseLengthMS = dist(mersenne_twister);
+        now =  std::chrono::steady_clock::now();
+        phaseEnd = now +  std::chrono::milliseconds(phaseLengthMS);
 
-        // Why are these coundoown calculations necessary?  Why can't I just compare time_points?                     
-        long countdown = std::chrono::duration_cast<std::chrono::milliseconds>(phaseEnd - now).count();
-        while(  countdown > 0) {
-//        while (now <= phaseEnd) {
+        while (now <= phaseEnd) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            auto now =  std::chrono::steady_clock::now();
-            countdown = std::chrono::duration_cast<std::chrono::milliseconds>(phaseEnd - now).count();
+            now =  std::chrono::steady_clock::now();
         }
         std::unique_lock<std::mutex> uLock(_mutex);
         _currentPhase = _currentPhase == TrafficLightPhase::green ? TrafficLightPhase::red : TrafficLightPhase::green;
